@@ -1,0 +1,16 @@
+# Sensitive environment variables
+.env
+env_template.txt
+
+# Databases
+soc_triage.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Streamlit
+.streamlit/
