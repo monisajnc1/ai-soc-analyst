@@ -8,111 +8,212 @@ from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# --- INITIALIZE ---
+# 1. Setup & Environment
 load_dotenv()
-VT_KEY = st.secrets.get("VT_API_KEY", os.getenv("VT_API_KEY"))
-PROV_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-DB_PATH = "soc_triage.db"
+VT_API_KEY = st.secrets.get("VT_API_KEY", os.getenv("VT_API_KEY"))
+OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+DB_NAME = "soc_triage.db"
 
-cloud_client = None
-if PROV_KEY and PROV_KEY.startswith("sk-") and "demo-key" not in PROV_KEY:
-    cloud_client = OpenAI(api_key=PROV_KEY)
+# Setup AI Client
+ai_client = None
+if OPENAI_KEY and OPENAI_KEY.startswith("sk-"):
+    ai_client = OpenAI(api_key=OPENAI_KEY)
 
-def init_db():
-    db = sqlite3.connect(DB_PATH); cur = db.cursor()
-    cur.execute('CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, source_ip TEXT, destination_ip TEXT, event_type TEXT, severity TEXT, message TEXT, raw_data TEXT, triage_summary TEXT, vt_report TEXT, mitre_mapping TEXT, response_recommendation TEXT, status TEXT DEFAULT "New")')
-    db.commit(); db.close()
+# 2. Database Functions
+def setup_db():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT, source_ip TEXT, destination_ip TEXT,
+            event_type TEXT, severity TEXT, message TEXT,
+            raw_data TEXT, triage_summary TEXT, vt_report TEXT,
+            mitre_mapping TEXT, response_recommendation TEXT,
+            status TEXT DEFAULT "New"
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-def insert_alert(data):
-    db = sqlite3.connect(DB_PATH); cur = db.cursor()
-    cur.execute('INSERT INTO alerts (timestamp, source_ip, destination_ip, event_type, severity, message, raw_data) VALUES (?, ?, ?, ?, ?, ?, ?)', 
-                 (data.get('timestamp', datetime.now().isoformat()), 
-                  data.get('src_ip') or data.get('source_ip'), 
-                  data.get('dest_ip') or data.get('destination_ip'), 
-                  data.get('type') or data.get('event_type'), 
-                  data.get('severity', 'Medium'), 
-                  data.get('msg') or data.get('message'), 
-                  json.dumps(data)))
-    nid = cur.lastrowid; db.commit(); db.close(); return nid
+def add_alert(data):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO alerts (timestamp, source_ip, destination_ip, event_type, severity, message, raw_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        data.get('timestamp', datetime.now().isoformat()),
+        data.get('src_ip') or data.get('source_ip'),
+        data.get('dest_ip') or data.get('destination_ip'),
+        data.get('type') or data.get('event_type'),
+        data.get('severity', 'Medium'),
+        data.get('msg') or data.get('message'),
+        json.dumps(data)
+    ))
+    new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
 
-def update_alert(aid, fields):
-    db = sqlite3.connect(DB_PATH); cur = db.cursor()
-    clause = ", ".join([f"{k} = ?" for k in fields.keys()])
-    vals = list(fields.values()); vals.append(aid)
-    cur.execute(f"UPDATE alerts SET {clause} WHERE id = ?", vals); db.commit(); db.close()
+def update_alert(alert_id, info):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    set_str = ", ".join([f"{k} = ?" for k in info.keys()])
+    vals = list(info.values())
+    vals.append(alert_id)
+    c.execute(f"UPDATE alerts SET {set_str} WHERE id = ?", vals)
+    conn.commit()
+    conn.close()
 
-def get_alerts():
-    db = sqlite3.connect(DB_PATH); db.row_factory = sqlite3.Row; cur = db.cursor()
-    cur.execute("SELECT * FROM alerts ORDER BY id DESC"); rows = cur.fetchall(); db.close()
+def get_all_alerts():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM alerts ORDER BY id DESC")
+    rows = c.fetchall()
+    conn.close()
     return [dict(r) for r in rows]
 
-def get_vt_report(ip):
-    # FORCE a malicious response for a known bad IP (for demonstration)
-    if ip == "223.25.1.88":
-        return {"status": "hit", "reputation": "Malicious", "malicious_count": 68}
+# 3. External Checks (VirusTotal / OpenAI)
+def check_vt(ip_addr):
+    # Hardcoded check for a specific test IP
+    if ip_addr == "223.25.1.88":
+        return {"status": "found", "reputation": "Malicious", "detections": 68}
     
-    if not VT_KEY or len(VT_KEY) < 10: return {"status": "mock", "reputation": "Clean", "malicious_count": 0}
+    if not VT_API_KEY or len(VT_API_KEY) < 10:
+        return {"status": "mock", "reputation": "Clean", "detections": 0}
+    
     try:
-        resp = requests.get(f"https://www.virustotal.com/api/v3/ip_addresses/{ip}", headers={"x-apikey": VT_KEY}, timeout=5)
-        if resp.status_code == 200:
-            stats = resp.json()['data']['attributes']['last_analysis_stats']
-            return {"status": "success", "reputation": "Malicious" if stats['malicious'] > 0 else "Clean", "malicious_count": stats['malicious']}
-    except: pass
-    return {"status": "error", "reputation": "Unknown"}
+        r = requests.get(f"https://www.virustotal.com/api/v3/ip_addresses/{ip_addr}", 
+                         headers={"x-apikey": VT_API_KEY}, timeout=5)
+        if r.status_code == 200:
+            res = r.json()
+            stats = res['data']['attributes']['last_analysis_stats']
+            return {
+                "status": "ok",
+                "reputation": "Malicious" if stats['malicious'] > 0 else "Clean",
+                "detections": stats['malicious']
+            }
+    except:
+        pass
+    return {"status": "error", "reputation": "Unknown", "detections": 0}
 
-# --- UI ---
-st.set_page_config(page_title="Sentinel Triage Platform", layout="wide", page_icon="🛡️")
-st.markdown("<style>[data-theme='dark'],[data-theme='light'],.stApp{background-color:#ffffff !important;}.main-title{font-family:'Inter';font-weight:800;background:linear-gradient(135deg,#1e293b,#2563eb);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-size:3rem;}p,span,label,div,h1,h2,h3,h4{color:#0f172a !important;}section[data-testid='stSidebar']{background-color:#f8fafc !important;border-right:1px solid #e2e8f0;}.stExpander{border-radius:12px;border:1px solid #e2e8f0;background-color:#ffffff;box-shadow:0 1px 3px rgba(0,0,0,0.05);margin-bottom:12px;}div[data-testid='stMetricValue']{color:#2563eb !important;font-weight:800 !important;}</style>", unsafe_allow_html=True)
-init_db()
+def get_ai_summary(alert_text):
+    if not ai_client:
+        return "Manual review needed. The AI engine is not configured."
+    try:
+        completion = ai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a SOC analyst helper."},
+                {"role": "user", "content": f"Summarize this alert for a quick report: {alert_text}"}
+            ]
+        )
+        return completion.choices[0].message.content
+    except:
+        return "Error getting AI summary."
 
+def map_to_mitre(alert_type):
+    t = str(alert_type).lower()
+    if "brute" in t: return "T1110 - Brute Force"
+    if "sql" in t: return "T1190 - SQL Injection"
+    return "T1059 - Command Line"
+
+# 4. Streamlit UI
+st.set_page_config(page_title="Alert Triage Bot", layout="wide", page_icon="🛡️")
+
+# Simple custom styling
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600;700&display=swap');
+    .stApp { background-color: #ffffff; }
+    .main-title {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-weight: 700;
+        color: #0f172a;
+        font-size: 2.5rem;
+        margin-bottom: 2rem;
+    }
+    section[data-testid="stSidebar"] {
+        background-color: #f8fafc;
+        border-right: 1px solid #e2e8f0;
+    }
+    .stExpander {
+        border-radius: 10px;
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        margin-bottom: 12px;
+    }
+    p, span, label, h1, h2, h3, h4, .stMarkdown {
+        color: #1e293b !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+setup_db()
+
+# Sidebar
 with st.sidebar:
-    st.markdown("<h1 style='color:#2563eb; margin:0;'>🛡️ SENTINEL</h1>", unsafe_allow_html=True)
-    st.caption("Strategic Triage Engine | Professional Edition")
+    st.header("SOC Triage Bot")
+    st.write("v1.5 - Internal Tool")
     st.divider()
-    view = st.radio("NAVIGATION", ["📊 Incident Dashboard", "📥 Ingestion Center", "🔍 Intel Console"])
-    if st.button("Reset Session Data", type="primary"):
-        if os.path.exists(DB_PATH): os.remove(DB_PATH)
+    page = st.radio("Navigation", ["Alert Dashboard", "Ingest Data", "Settings"])
+    st.divider()
+    if st.button("Delete All Logs"):
+        if os.path.exists(DB_NAME):
+            os.remove(DB_NAME)
         st.rerun()
 
-if view == "📊 Incident Dashboard":
-    st.markdown("<h1 class='main-title'>Operational Dashboard</h1>", unsafe_allow_html=True)
-    rows = get_alerts()
-    if not rows: st.info("No active incidents. Use the Ingestion Center to pull telemetry.")
+# Page Routing
+if page == "Alert Dashboard":
+    st.markdown("<h1 class='main-title'>Alert Dashboard</h1>", unsafe_allow_html=True)
+    all_data = get_all_alerts()
+    if not all_data:
+        st.info("No active alerts. Go to the Ingest tab to add data.")
     else:
-        df = pd.DataFrame(rows)
-        c1, c2, c3 = st.columns(3); c1.metric("TOTAL INCIDENTS",len(df)); c2.metric("PENDING TRIAGE",len(df[df['status']=='New'])); c3.metric("SYSTEM STATUS","OPTIMAL")
+        df = pd.DataFrame(all_data)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Ingested", len(df))
+        col2.metric("New Alerts", len(df[df['status']=="New"]))
+        col3.metric("System Health", "Good")
         st.divider()
-        for r in rows:
-            with st.expander(f"⚠️ [{r.get('severity','Med')}] {r.get('event_type','Alert')} @ {r.get('source_ip','Indicator')}"):
-                cl1, cl2 = st.columns(2)
-                with cl1:
-                    st.markdown("#### 📋 Details")
-                    st.write(f"**Target Host:** {r.get('destination_ip')}"); st.write(f"**Problem Message:** {r.get('message')}")
-                    if r.get('vt_report'):
-                        vt = json.loads(r['vt_report'])
+        for item in all_data:
+            header = f"[{item['severity']}] {item['event_type']} - Host: {item['source_ip']}"
+            with st.expander(header):
+                left, right = st.columns(2)
+                with left:
+                    st.subheader("Event Info")
+                    st.write(f"**Target:** {item['destination_ip']}")
+                    st.write(f"**Msg:** {item['message']}")
+                    st.write(f"**MITRE Tech:** `{item['mitre_mapping']}`")
+                    if item['vt_report']:
+                        vt = json.loads(item['vt_report'])
                         st.markdown("---")
-                        st.markdown("#### 🌐 OSINT Intelligence")
-                        sc = "red" if vt.get('reputation') == "Malicious" else "green"
-                        st.markdown(f"**VT Verdict:** <span style='color:{sc}; font-weight:bold;'>{vt.get('reputation','Clean')}</span>", unsafe_allow_html=True)
-                        st.write(f"**Security Engines:** {vt.get('malicious_count',0)} detections")
-                with cl2:
-                    st.markdown("#### 🧠 AI Analysis")
-                    st.info(r.get('triage_summary') or "Automated review in progress...")
-                    st.success(f"**Recommendation:** Isolation of indicated host and full disk forensics.")
+                        st.subheader("OSINT Data")
+                        res_color = "#b91c1c" if vt['reputation'] == "Malicious" else "#15803d"
+                        st.markdown(f"**Verdict:** <span style='color:{res_color}; font-weight:bold;'>{vt['reputation']}</span>", unsafe_allow_html=True)
+                        st.write(f"**Engine Detections:** {vt['detections']} engines flagged this")
+                with right:
+                    st.subheader("Analysis Summary")
+                    st.info(item['triage_summary'] or "Waiting for analysis...")
+                    st.success("**Recommendation:** Review logs and isolate if suspicious activity continues.")
 
-elif view == "📥 Ingestion Center":
-    st.markdown("<h1 class='main-title'>Ingestion Hub</h1>", unsafe_allow_html=True)
-    if st.button("🚀 Pull Telemetry from Splunk"):
-        samples = [
-            {"src_ip": "223.25.1.88", "dest_ip": "DMZ-WEB-04", "type": "SQL Injection", "msg": "Malicious payload in URI"},
-            {"src_ip": "1.1.1.1", "dest_ip": "Office-PC", "type": "Brute Force", "msg": "Repeated failed logins"}
+elif page == "Ingest Data":
+    st.markdown("<h1 class='main-title'>Data Ingestion</h1>", unsafe_allow_html=True)
+    if st.button("Load Mock Splunk Data"):
+        mock_events = [
+            {"src_ip": "223.25.1.88", "dest_ip": "db-server", "type": "SQL Injection", "msg": "Detected SQL code in user agent", "severity": "Critical"},
+            {"src_ip": "1.1.1.1", "dest_ip": "internal-hq", "type": "Brute Force", "msg": "Login failure threshold reached", "severity": "High"}
         ]
-        for s in samples:
-            aid = insert_alert(s); vt = get_vt_report(s['src_ip'])
-            update_alert(aid, {"vt_report": json.dumps(vt)})
-        st.success("Telemetry Synced! Check Dashboard.")
+        for ev in mock_events:
+            row_id = add_alert(ev)
+            vt_res = check_vt(ev['src_ip'])
+            ai_res = get_ai_summary(ev)
+            update_alert(row_id, {"vt_report": json.dumps(vt_res), "triage_summary": ai_res, "mitre_mapping": map_to_mitre(ev['type'])})
+        st.success("Test logs added to the dashboard.")
 
-elif view == "🔍 Intel Console":
-    st.markdown("<h1 class='main-title'>Intel Console</h1>", unsafe_allow_html=True)
-    st.write(f"**OpenAI Service:** {'Connected ✅' if cloud_client else 'Disconnected ❌'}")
-    st.write(f"**VirusTotal API:** {'Active ✅' if VT_KEY and len(VT_KEY)>10 else 'Inactive ❌'}")
+elif page == "Settings":
+    st.markdown("<h1 class='main-title'>System Settings</h1>", unsafe_allow_html=True)
+    st.write(f"**OpenAI API:** {'Connected ✅' if ai_client else 'Missing Key'}")
+    st.write(f"**VirusTotal API:** {'Connected ✅' if VT_API_KEY and len(VT_API_KEY) > 10 else 'Missing Key'}")
