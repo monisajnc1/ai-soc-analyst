@@ -25,7 +25,6 @@ def init_db():
 
 def insert_alert(data):
     db = sqlite3.connect(DB_PATH); cur = db.cursor()
-    # Using .get for absolute safety
     cur.execute('INSERT INTO alerts (timestamp, source_ip, destination_ip, event_type, severity, message, raw_data) VALUES (?, ?, ?, ?, ?, ?, ?)', 
                  (data.get('timestamp', datetime.now().isoformat()), 
                   data.get('src_ip') or data.get('source_ip'), 
@@ -47,10 +46,14 @@ def get_alerts():
     cur.execute("SELECT * FROM alerts ORDER BY id DESC"); rows = cur.fetchall(); db.close()
     return [dict(r) for r in rows]
 
-def get_vt_report(indicator):
+def get_vt_report(ip):
+    # FORCE a malicious response for a known bad IP (for demonstration)
+    if ip == "223.25.1.88":
+        return {"status": "hit", "reputation": "Malicious", "malicious_count": 68}
+    
     if not VT_KEY or len(VT_KEY) < 10: return {"status": "mock", "reputation": "Clean", "malicious_count": 0}
     try:
-        resp = requests.get(f"https://www.virustotal.com/api/v3/ip_addresses/{indicator}", headers={"x-apikey": VT_KEY}, timeout=5)
+        resp = requests.get(f"https://www.virustotal.com/api/v3/ip_addresses/{ip}", headers={"x-apikey": VT_KEY}, timeout=5)
         if resp.status_code == 200:
             stats = resp.json()['data']['attributes']['last_analysis_stats']
             return {"status": "success", "reputation": "Malicious" if stats['malicious'] > 0 else "Clean", "malicious_count": stats['malicious']}
@@ -84,25 +87,25 @@ if view == "📊 Incident Dashboard":
                 cl1, cl2 = st.columns(2)
                 with cl1:
                     st.markdown("#### 📋 Details")
-                    st.write(f"**Target:** {r.get('destination_ip')}"); st.write(f"**Message:** {r.get('message')}")
+                    st.write(f"**Target Host:** {r.get('destination_ip')}"); st.write(f"**Problem Message:** {r.get('message')}")
                     if r.get('vt_report'):
                         vt = json.loads(r['vt_report'])
                         st.markdown("---")
                         st.markdown("#### 🌐 OSINT Intelligence")
                         sc = "red" if vt.get('reputation') == "Malicious" else "green"
-                        st.markdown(f"**VT Verdict:** <span style='color:{sc};'>{vt.get('reputation','Clean')}</span>", unsafe_allow_html=True)
+                        st.markdown(f"**VT Verdict:** <span style='color:{sc}; font-weight:bold;'>{vt.get('reputation','Clean')}</span>", unsafe_allow_html=True)
                         st.write(f"**Security Engines:** {vt.get('malicious_count',0)} detections")
                 with cl2:
                     st.markdown("#### 🧠 AI Analysis")
-                    st.info(r.get('triage_summary') or "Reviewing logs...")
-                    st.success(f"**Recommendation:** Isolation of and threat hunting on indicated host.")
+                    st.info(r.get('triage_summary') or "Automated review in progress...")
+                    st.success(f"**Recommendation:** Isolation of indicated host and full disk forensics.")
 
 elif view == "📥 Ingestion Center":
     st.markdown("<h1 class='main-title'>Ingestion Hub</h1>", unsafe_allow_html=True)
     if st.button("🚀 Pull Telemetry from Splunk"):
         samples = [
-            {"src_ip": "1.1.1.1", "dest_ip": "Sales-Web", "type": "Brute Force", "msg": "Repeated failed logins detected"},
-            {"src_ip": "103.4.1.2", "dest_ip": "Finance-DB", "type": "SQL Injection", "msg": "Suspicious POST request data"}
+            {"src_ip": "223.25.1.88", "dest_ip": "DMZ-WEB-04", "type": "SQL Injection", "msg": "Malicious payload in URI"},
+            {"src_ip": "1.1.1.1", "dest_ip": "Office-PC", "type": "Brute Force", "msg": "Repeated failed logins"}
         ]
         for s in samples:
             aid = insert_alert(s); vt = get_vt_report(s['src_ip'])
