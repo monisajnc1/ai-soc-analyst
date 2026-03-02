@@ -6,60 +6,70 @@ from datetime import datetime
 # Local imports
 from database import get_alerts, init_db, insert_alert, update_alert
 from enrichment import preprocess_alert, get_vt_report, VT_KEY
-from analysis import get_ai_analysis, get_mitre_mapping, get_response_recommendation, classify_severity, OPENAI_KEY
+from analysis import get_triage_summary, get_mitre_mapping, get_response_recommendation, classify_severity, PROV_KEY
 
 # --- Page Setup ---
 st.set_page_config(page_title="Sentinel Triage Platform", layout="wide", page_icon="🛡️")
 
-# --- Premium Cyber-Dark Styling ---
+# --- Premium Professional Light Theme Styling ---
 st.markdown("""
 <style>
-    /* Main Background & Text */
-    .stApp {
-        background: linear-gradient(135deg, #0f1116 0%, #171921 100%);
-        color: #e0e0e0;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap');
+
+    /* GLOBAL DARK-MODE NUKE - Force light theme even if system/account is set to dark */
+    [data-theme="dark"], [data-theme="light"], .stApp, 
+    [data-testid="stAppViewContainer"], [data-testid="stHeader"], 
+    [data-testid="stSidebar"], [data-testid="stToolbar"] {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+    }
+
+    :root {
+        --bg-color: #ffffff;
+        --sidebar-bg: #f8fafc;
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --accent-primary: #2563eb;
+        --border-color: #e2e8f0;
+    }
+
+    /* Professional Header Gradient */
+    .main-title {
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 800 !important;
+        background: linear-gradient(135deg, #1e293b 0%, #2563eb 100%) !important;
+        -webkit-background-clip: text !important;
+        -webkit-text-fill-color: transparent !important;
+        font-size: 3rem !important;
+        letter-spacing: -0.05em !important;
+        margin-bottom: 0.25rem !important;
+    }
+
+    /* Force all text elements to be dark */
+    p, span, label, div, h1, h2, h3, h4, .stMarkdown, .stText, .stCaption {
+        color: #0f172a !important;
+    }
+
+    /* Premium Sidebar Styling */
+    section[data-testid="stSidebar"], [data-testid="stSidebarNav"] {
+        background-color: #f8fafc !important;
+        border-right: 1px solid #e2e8f0 !important;
     }
     
-    /* Center the main title */
-    .main-title {
-        font-family: 'Inter', sans-serif;
-        font-weight: 800;
-        background: linear-gradient(90deg, #ff4b4b, #ff8a8a);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 3rem;
-        margin-bottom: 0.5rem;
-    }
-
-    /* Sidebar Styling */
-    section[data-testid="stSidebar"] {
-        background-color: #0b0d11 !important;
-        border-right: 1px solid #2d3139;
-    }
-
-    /* Card-like containers for metrics */
-    div[data-testid="stMetricValue"] {
-        color: #ff4b4b !important;
-        font-family: 'JetBrains Mono', monospace;
-    }
-
-    /* Glassmorphism Expander */
+    /* Clean Cards/Expanders */
     .stExpander {
-        background: rgba(30, 34, 45, 0.4) !important;
-        border: 1px solid rgba(255, 255, 255, 0.05) !important;
-        border-radius: 10px !important;
-        margin-bottom: 0.8rem;
+        border-radius: 16px !important;
+        border: 1px solid #e2e8f0 !important;
+        background-color: #ffffff !important;
+        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1) !important;
+        margin-bottom: 1.25rem !important;
     }
 
-    /* Sidebar buttons */
-    .stButton>button {
-        border-radius: 8px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(255, 75, 75, 0.2);
+    /* Metric Visualization */
+    div[data-testid="stMetricValue"] {
+        color: #2563eb !important;
+        font-size: 2.2rem !important;
+        font-weight: 700 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -69,8 +79,8 @@ init_db()
 
 # --- Sidebar Navigation ---
 with st.sidebar:
-    st.markdown("<h1 style='color:#ff4b4b;'>🛡️ SENTINEL</h1>", unsafe_allow_html=True)
-    st.caption("Strategic Triage Engine v1.0.2")
+    st.markdown("<h1 style='color:var(--accent-primary);'>🛡️ SENTINEL</h1>", unsafe_allow_html=True)
+    st.caption("Strategic Triage Engine v1.1.0-LIGHT-THEME-FORCED")
     st.divider()
     
     view = st.radio("NAVIGATION", 
@@ -79,9 +89,9 @@ with st.sidebar:
     
     st.divider()
     
-    # Analyst Profile persistent in sidebar
-    st.subheader("👤 Analyst")
-    user_self = st.text_input("Profile Name", "Analyst_1", help="Changes current session owner")
+    # Personal analyst profile
+    st.subheader("👤 Profile")
+    analyst_id = st.text_input("Name", "Analyst_1", help="Changes current session owner")
     
     st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
     st.sidebar.info("Operational Status: ONLINE")
@@ -153,13 +163,13 @@ if view == "📊 Incident Dashboard":
                     txt = st.text_input("Update log...", key=f"note_in_{r['id']}", placeholder="Add technical observations...")
                     if st.button("Add Log Entry", key=f"note_sub_{r['id']}"):
                         if txt:
-                            notes.append({"user": user_self, "time": datetime.now().isoformat(), "text": txt})
+                            notes.append({"user": analyst_id, "time": datetime.now().isoformat(), "text": txt})
                             update_alert(r['id'], {"comments": json.dumps(notes)})
                             st.rerun()
 
                 with col_r:
-                    st.markdown("#### 🤖 AI Triage Engine")
-                    st.info(r['ai_analysis'] or "Analysis in priority queue...")
+                    st.markdown("#### 🛡️ Behavioral Analysis")
+                    st.info(r['triage_summary'] or "Analysis in priority queue...")
                     
                     st.markdown("#### 🛠️ Response Playbook")
                     st.success(r['response_recommendation'] or "Awaiting manual triage.")
@@ -206,13 +216,13 @@ elif view == "📥 Ingestion Center":
                         
                         # Pipeline
                         vt = get_vt_report(proc['source_ip'])
-                        ai = get_ai_analysis(proc)
+                        ts = get_triage_summary(proc)
                         mtt = get_mitre_mapping(proc)
                         rec = get_response_recommendation(proc, vt)
                         sev = classify_severity(proc, vt)
                         
                         update_alert(aid, {
-                            "vt_report": json.dumps(vt), "ai_analysis": ai,
+                            "vt_report": json.dumps(vt), "triage_summary": ts,
                             "mitre_mapping": mtt, "response_recommendation": rec, "severity": sev
                         })
                     st.success(f"Synced {len(s_data)} events from Splunk.")
@@ -228,9 +238,9 @@ elif view == "📥 Ingestion Center":
                 proc = preprocess_alert(a)
                 aid = insert_alert(proc)
                 vt = get_vt_report(proc['source_ip'])
-                ai = get_ai_analysis(proc)
+                ts = get_triage_summary(proc)
                 update_alert(aid, {
-                    "vt_report": json.dumps(vt), "ai_analysis": ai,
+                    "vt_report": json.dumps(vt), "triage_summary": ts,
                     "mitre_mapping": get_mitre_mapping(proc), "severity": classify_severity(proc, vt),
                     "response_recommendation": get_response_recommendation(proc, vt)
                 })
@@ -249,9 +259,9 @@ elif view == "📥 Ingestion Center":
                 aid = insert_alert(proc)
                 # Run full triage logic
                 vt = get_vt_report(proc['source_ip'])
-                ai = get_ai_analysis(proc)
+                ts = get_triage_summary(proc)
                 update_alert(aid, {
-                    "vt_report": json.dumps(vt), "ai_analysis": ai,
+                    "vt_report": json.dumps(vt), "triage_summary": ts,
                     "mitre_mapping": get_mitre_mapping(proc), "severity": classify_severity(proc, vt),
                     "response_recommendation": get_response_recommendation(proc, vt)
                 })
@@ -270,7 +280,7 @@ elif view == "📥 Ingestion Center":
                     proc = preprocess_alert(obj)
                     aid = insert_alert(proc)
                     vt = get_vt_report(proc['source_ip'])
-                    update_alert(aid, {"vt_report": json.dumps(vt), "ai_analysis": get_ai_analysis(proc)})
+                    update_alert(aid, {"vt_report": json.dumps(vt), "triage_summary": get_triage_summary(proc)})
                     bar.progress((i + 1) / len(items))
                 st.success("Batch processing complete.")
             except Exception as e:
@@ -294,10 +304,10 @@ elif view == "🔍 Intel Console":
     with c_ai:
         api_val = os.getenv("OPENAI_API_KEY", "")
         if api_val.startswith('sk-'):
-            st.success("🤖 OpenAI: CONNECTED")
-            st.caption("Advanced LLM triaging is active.")
+            st.success("✅ Provider: CONNECTED")
+            st.caption("Advanced behavioral triaging is active.")
         else:
-            st.error("🤖 OpenAI: OFFLINE")
+            st.error("❌ Provider: OFFLINE")
             st.caption("Using local heuristic fallback engine.")
             
     with c_vt:
@@ -312,7 +322,7 @@ elif view == "🔍 Intel Console":
     st.divider()
     
     st.markdown("#### ⚙️ Session Identity")
-    st.info(f"**Platform:** Sentinel Strategic Triage Engine  \n**Active Analyst:** `{user_self}`")
+    st.info(f"**Host:** Sentinel Triage Engine  \n**User:** `{analyst_id}`")
     
     st.divider()
     st.subheader("🧪 Diagnostics")
@@ -336,4 +346,6 @@ except:
     pass
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Sentinel v1.0.2 | Professional Edition")
+st.sidebar.caption("Sentinel v1.1.0-LIGHT-THEME-FORCED | Professional Edition")
+
+
