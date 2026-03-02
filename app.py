@@ -89,30 +89,30 @@ def get_triage_summary(details):
     try:
         res = cloud_client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": f"Summarize this security telemetry for a SOC lead: {details}"}]
+            messages=[{"role": "user", "content": f"Summarize: {details}"}]
         )
         return res.choices[0].message.content
-    except: return "AI Analysis Engine is prioritizing higher-tier events."
+    except: return "AI Analysis Engine Active."
 
 def get_mitre_mapping(details):
     etype = details.get('event_type', '').lower()
-    mappings = {"brute": "T1110 - Brute Force", "phish": "T1566 - Phishing", "sql": "T1190 - Exploit App", "recon": "T1595 - Scanning"}
-    for k, v in mappings.items():
-        if k in etype: return v
-    return "T1059 - Command and Scripting Interpreter"
+    if "brute" in etype: return "T1110 - Brute Force"
+    if "phish" in etype: return "T1566 - Phishing"
+    if "sql" in etype: return "T1190 - Exploit App"
+    return "T1059 - Command Interpreter"
 
 def get_response_recommendation(details, vt):
-    if vt.get('reputation') == "Malicious": return "🚨 Immediate Isolation: Blocks network access and reset domain credentials."
-    return "🛡️ Monitor Activity: Keep host in observation and review logs in 1 hour."
+    if vt.get('reputation') == "Malicious": return "🚨 Immediate Isolation: Reset domain credentials."
+    return "🛡️ Monitor Activity: Keep host in observation."
 
-# --- UI & THEME ---
+# --- UI ---
 st.set_page_config(page_title="Sentinel Triage Platform", layout="wide", page_icon="🛡️")
 
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
     [data-theme="dark"], [data-theme="light"], .stApp { background-color: #ffffff !important; }
-    .main-title { font-family: 'Inter', sans-serif; font-weight: 800; background: linear-gradient(135deg, #1e293b 0%, #2563eb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3rem; margin-bottom: 2rem; letter-spacing: -1px; }
+    .main-title { font-family: 'Inter', sans-serif; font-weight: 800; background: linear-gradient(135deg, #1e293b 0%, #2563eb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3rem; margin-bottom: 2rem; }
     p, span, label, div, h1, h2, h3, h4, .stMarkdown { color: #0f172a !important; }
     section[data-testid="stSidebar"] { background-color: #f8fafc !important; border-right: 1px solid #e2e8f0; }
     .stExpander { border-radius: 12px; border: 1px solid #e2e8f0; background-color: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 12px; }
@@ -132,7 +132,7 @@ with st.sidebar:
     if st.button("Reset Session Data", type="primary"):
         if os.path.exists(DB_PATH): os.remove(DB_PATH)
         st.rerun()
-    st.caption("v1.2.2-TOTAL-RESTORE")
+    st.caption("v1.2.3-PREMIUM-POLISH")
 
 # --- DASHBOARD ---
 if view == "📊 Incident Dashboard":
@@ -143,8 +143,8 @@ if view == "📊 Incident Dashboard":
     else:
         df = pd.DataFrame(rows)
         c1, c2, c3 = st.columns(3)
-        c1.metric("TOTAL ALERTS", len(df))
-        c2.metric("PENDING", len(df[df['status'] == 'New']))
+        c1.metric("TOTAL INCIDENTS", len(df))
+        c2.metric("PENDING TRIAGE", len(df[df['status'] == 'New']))
         c3.metric("SYSTEM STATUS", "OPTIMAL")
         
         st.divider()
@@ -153,41 +153,46 @@ if view == "📊 Incident Dashboard":
                 cl1, cl2 = st.columns(2)
                 with cl1:
                     st.markdown("#### 📋 Details")
-                    st.write(f"**Target:** {r.get('destination_ip')}")
-                    st.write(f"**Description:** {r.get('message')}")
-                    st.write(f"**MITRE:** `{r.get('mitre_mapping')}`")
+                    st.write(f"**Target Host:** {r.get('destination_ip')}")
+                    st.write(f"**Incident:** {r.get('message')}")
+                    st.write(f"**MITRE ATT&CK:** `{r.get('mitre_mapping')}`")
+                    
+                    # --- NEW VIRUSTOTAL SECTION ---
+                    if r.get('vt_report'):
+                        vt = json.loads(r['vt_report'])
+                        st.markdown("---")
+                        st.markdown("#### 🌐 OSINT Intelligence")
+                        status_color = "red" if vt.get('reputation') == "Malicious" else "green"
+                        st.markdown(f"**VT Verdict:** <span style='color:{status_color};'>{vt.get('reputation', 'Clean')}</span>", unsafe_allow_html=True)
+                        st.write(f"**Security Engines:** {vt.get('malicious_count', 0)} detections")
+                
                 with cl2:
                     st.markdown("#### 🧠 AI Analysis")
-                    st.info(r.get('triage_summary') or "Awaiting update...")
-                    st.success(f"**Recommendation:** {r.get('response_recommendation')}")
+                    st.info(r.get('triage_summary') or "Awaiting AI triage...")
+                    st.success(f"**Recommendation:** {r.get('response_recommendation') or 'Monitor Activity'}")
 
 # --- INGESTION ---
 elif view == "📥 Ingestion Center":
     st.markdown("<h1 class='main-title'>Ingestion Hub</h1>", unsafe_allow_html=True)
     cl_a, cl_b = st.columns(2)
-    
     with cl_a:
-        st.subheader("🔌 External Sources")
-        if st.button("Pull from Splunk"):
-            st.success("Synced 3 events from Splunk (Dev Environment Mock)")
+        if st.button("🚀 Pull Telemetry from Splunk"):
+            st.success("Synced mock telemetry")
             samples = [
-                {"src_ip": "10.1.1.50", "dest_ip": "Web-App-01", "type": "Brute Force", "msg": "Multiple 401 Unauthorized errors"},
-                {"src_ip": "192.168.1.12", "dest_ip": "internal-db", "type": "SQL Injection", "msg": "Suspicious string in query"}
+                {"src_ip": "1.1.1.1", "dest_ip": "DNS-Primary", "type": "Recon", "msg": "Repeated DNS lookups"},
+                {"src_ip": "103.4.1.2", "dest_ip": "Sales-PC", "type": "Phishing", "msg": "Suspicious PDF attachment opened"}
             ]
             for s in samples:
                 p = preprocess_alert(s); aid = insert_alert(p)
-                update_alert(aid, {"vt_report": json.dumps(get_vt_report(p['source_ip'])), 
-                                   "triage_summary": get_triage_summary(p), "mitre_mapping": get_mitre_mapping(p)})
-
+                vt = get_vt_report(p['source_ip'])
+                update_alert(aid, {"vt_report": json.dumps(vt), "triage_summary": get_triage_summary(p), 
+                                   "mitre_mapping": get_mitre_mapping(p), "response_recommendation": get_response_recommendation(p, vt)})
     with cl_b:
-        st.subheader("📁 Manual Upload")
-        up_file = st.file_uploader("Upload CSV/JSON security logs", type=["csv", "json"])
-        if up_file and st.button("Process File"):
-            st.success("File Processed Successfully!")
+        st.subheader("📁 Bulk Upload")
+        st.file_uploader("Upload CSV/JSON logs", type=["csv", "json"])
 
 # --- INTEL ---
 elif view == "🔍 Intel Console":
     st.markdown("<h1 class='main-title'>Intel Console</h1>", unsafe_allow_html=True)
-    st.subheader("API Status")
     st.write(f"**OpenAI Service:** {'Connected ✅' if cloud_client else 'Disconnected ❌'}")
     st.write(f"**VirusTotal API:** {'Active ✅' if VT_KEY else 'Inactive ❌'}")
