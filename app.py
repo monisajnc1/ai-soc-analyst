@@ -71,15 +71,13 @@ def get_alerts():
 
 # --- ENRICHMENT & ANALYSIS LOGIC ---
 def get_vt_report(indicator):
-    if not VT_KEY or "simulation-hub" in VT_KEY:
-        return {"status": "local_heuristic", "indicator": indicator, "reputation": "Clean", "malicious_count": 0}
-    api_url = f"https://www.virustotal.com/api/v3/ip_addresses/{indicator}"
+    if not VT_KEY or "your" in VT_KEY:
+        return {"status": "local", "reputation": "Clean", "malicious_count": 0}
     try:
-        resp = requests.get(api_url, headers={"x-apikey": VT_KEY})
+        resp = requests.get(f"https://www.virustotal.com/api/v3/ip_addresses/{indicator}", headers={"x-apikey": VT_KEY}, timeout=5)
         stats = resp.json()['data']['attributes']['last_analysis_stats']
         return {"status": "success", "reputation": "Malicious" if stats['malicious'] > 0 else "Clean", "malicious_count": stats['malicious']}
-    except:
-        return {"status": "error", "reputation": "Unknown"}
+    except: return {"status": "error", "reputation": "Unknown"}
 
 def preprocess_alert(raw):
     return {"timestamp": raw.get("timestamp") or datetime.now().isoformat(), "source_ip": raw.get("src_ip"), 
@@ -87,24 +85,14 @@ def preprocess_alert(raw):
             "severity": raw.get("severity", "Medium"), "message": raw.get("msg"), "raw_data": raw}
 
 def get_triage_summary(details):
-    if not cloud_client: return "Local analysis: Review logs for suspicious patterns."
+    if not cloud_client: return "Review logs for suspicious patterns."
     try:
         res = cloud_client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": f"Summarize this security alert: {details}"}]
+            messages=[{"role": "user", "content": f"Summarize: {details}"}]
         )
         return res.choices[0].message.content
     except: return "AI Triage unavailable."
-
-def get_mitre_mapping(details):
-    return "T1595 - Active Scanning"
-
-def get_response_recommendation(details, vt):
-    if vt.get('reputation') == "Malicious": return "Isolate Host immediately."
-    return "Monitor activity."
-
-def classify_severity(details, vt):
-    return "High" if vt.get('malicious_count', 0) > 0 else details.get('severity', 'Medium')
 
 # --- UI & THEME ---
 st.set_page_config(page_title="Sentinel Triage Platform", layout="wide", page_icon="🛡️")
@@ -112,11 +100,11 @@ st.set_page_config(page_title="Sentinel Triage Platform", layout="wide", page_ic
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-    [data-theme="dark"], [data-theme="light"], .stApp { background-color: #ffffff !important; color: #0f172a !important; }
-    .main-title { font-family: 'Inter', sans-serif; font-weight: 800; background: linear-gradient(135deg, #1e293b 0%, #2563eb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3rem; }
-    p, span, label, div, h1, h2, h3, h4 { color: #0f172a !important; }
-    section[data-testid="stSidebar"] { background-color: #f8fafc !important; }
-    .stExpander { border-radius: 12px; border: 1px solid #e2e8f0; background-color: #ffffff; }
+    [data-theme="dark"], [data-theme="light"], .stApp { background-color: #ffffff !important; }
+    .main-title { font-family: 'Inter', sans-serif; font-weight: 800; background: linear-gradient(135deg, #1e293b 0%, #2563eb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3rem; margin-bottom: 2rem; }
+    p, span, label, div, h1, h2, h3, h4, .stMarkdown { color: #0f172a !important; }
+    section[data-testid="stSidebar"] { background-color: #f8fafc !important; border-right: 1px solid #e2e8f0; }
+    .stExpander { border-radius: 12px; border: 1px solid #e2e8f0; background-color: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.05); margin-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -124,30 +112,40 @@ init_db()
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.markdown("<h1 style='color:#2563eb;'>🛡️ SENTINEL</h1>", unsafe_allow_html=True)
-    st.caption("Strategic Triage Engine v1.2.0-ULTIMATE-LIGHT")
+    st.markdown("<h1 style='color:#2563eb; margin:0;'>🛡️ SENTINEL</h1>", unsafe_allow_html=True)
+    st.caption("Strategic Triage Engine v1.2.1-FINAL")
+    st.divider()
     view = st.radio("NAVIGATION", ["📊 Dashboard", "📥 Ingestion"])
-    st.info("Operational Status: ONLINE")
+    
+    # Emergency Reset if data is weird
+    if st.button("Reset Session Data", type="primary"):
+        if os.path.exists(DB_PATH): os.remove(DB_PATH)
+        st.rerun()
 
 # --- DASHBOARD ---
 if view == "📊 Dashboard":
     st.markdown("<h1 class='main-title'>Operational Dashboard</h1>", unsafe_allow_html=True)
     rows = get_alerts()
     if not rows:
-        st.warning("No incidents detected.")
+        st.info("No incidents detected. Go to Ingestion to add some!")
     else:
         for r in rows:
-            with st.expander(f"{r['event_type']} @ {r['source_ip']}"):
-                st.write(f"**Message:** {r['message']}")
-                st.info(f"**Analysis:** {r['triage_summary']}")
+            title = f"{r.get('event_type', 'Alert')} @ {r.get('source_ip', '0.0.0.0')}"
+            with st.expander(title):
+                st.write(f"**Target:** {r.get('destination_ip', 'Local')}")
+                st.write(f"**Details:** {r.get('message', 'No description')}")
+                st.divider()
+                st.info(f"**Analysis:** {r.get('triage_summary', 'Awaiting ingestion update...')}")
 
 # --- INGESTION ---
 elif view == "📥 Ingestion":
     st.markdown("<h1 class='main-title'>Ingestion Hub</h1>", unsafe_allow_html=True)
-    if st.button("Simulate Attack"):
-        a = {"src_ip": "10.0.0.1", "dest_ip": "Server-01", "type": "SQL Injection", "msg": "Malicious payload detected"}
+    st.write("Click below to simulate a network attack.")
+    if st.button("🚀 Ingest Sample Attack"):
+        a = {"src_ip": "103.45.1.88", "dest_ip": "DMZ-WEB", "type": "Brute Force", "msg": "Multiple 401 Unauthorized errors detected"}
         proc = preprocess_alert(a)
         aid = insert_alert(proc)
         vt = get_vt_report(proc['source_ip'])
-        update_alert(aid, {"vt_report": json.dumps(vt), "triage_summary": get_triage_summary(proc)})
-        st.success("Alert ingested! Check dashboard.")
+        summary = get_triage_summary(proc)
+        update_alert(aid, {"vt_report": json.dumps(vt), "triage_summary": summary})
+        st.success("Alert Ingested Successfully! Check Dashboard.")
