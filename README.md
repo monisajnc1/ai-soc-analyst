@@ -1,49 +1,58 @@
-# Sentinel: Strategic Triage Platform 🛡️
+# AI SOC Analyst
 
-Sentinel is a professional-grade, AI-powered SOC analyst triage platform designed to automate the initial analysis of security alerts. By integrating Large Language Models (LLMs) with global threat intelligence and SIEM telemetry, Sentinel drastically reduces MTTR (Mean Time to Respond).
+An automated SIEM alert triage platform built with Python and Streamlit.
 
-## 🚀 Key Features
+## Objectives
 
-*   **Multi-View Navigation**: Integrated Dashboard, Ingestion Center, and Intel Console.
-*   **AI Behavioral Triage**: Autonomous technical summaries and attack pattern recognition via GPT-4/3.5 models.
-*   **Threat Intel Fusion**: Automated VirusTotal reputation scanning for suspicious indicators.
-*   **MITRE ATT&CK Mapping**: Instant correlation of events to specific tactics and techniques.
-*   **Multi-Analyst Collaboration**: Incident assignment system with persistent technical log threads.
-*   **SIEM Integration**: Native support for Splunk (including a high-fidelity simulation mode).
-*   **Bulk Telemetry Ingestion**: Seamless import of security logs via CSV and JSON.
+- Design and develop an **AI-powered automated triage system** for SIEM alerts.
+- Reduce **manual effort and alert fatigue** faced by SOC analysts.
+- Automatically **analyze and classify alerts** based on potential risk and severity.
+- Enrich alerts using **threat intelligence from VirusTotal**.
+- Map alerts to the **MITRE ATT&CK framework** for better understanding of attacker behaviour.
+- Generate **contextual explanations and response suggestions** using AI.
+- Present alert analysis through an **interactive Streamlit dashboard**.
+- Store alert data and analysis results in a **SQLite database** for tracking and historical analysis.
 
-## 🛠️ Deployment & Setup
+## Tech Stack
 
-### 1. Environment Preparation
-Ensure you have Python 3.9+ installed. Clone the repository and install the standard dependency stack:
-```bash
-pip install -r requirements.txt
+| Component   | Technology            |
+|-------------|-----------------------|
+| Frontend    | Streamlit (light theme) |
+| Database    | SQLite3               |
+| AI Engine   | OpenAI GPT-3.5        |
+| Threat Intel| VirusTotal API        |
+| Language    | Python 3.9+           |
+
+## Project Structure
+
+```
+ai-soc-analyst/
+├── app.py            # Main dashboard and triage pipeline
+├── database.py       # SQLite CRUD helpers
+├── enrichment.py     # VirusTotal IP reputation lookup
+├── analysis.py       # AI triage, MITRE mapping, response engine
+├── requirements.txt  # Python dependencies
+├── .env              # API keys (not committed)
+└── .streamlit/
+    └── config.toml   # Light theme configuration
 ```
 
-### 2. Configuration
-Sentinel relies on a `.env` file for API orchestration. Use the provided template or create one:
-```env
-OPENAI_API_KEY=sk-your-key
-VT_API_KEY=vt-your-key
-SPLUNK_HOST=localhost
-SPLUNK_PORT=8089
-```
-> [!TIP]
-> Use the built-in **Demo Mode** keys to test the platform's visual indicators without a live API subscription.
+## Quick Start
 
-### 3. Execution
-Launch the production-ready dashboard:
-```bash
-streamlit run app.py
-```
+1. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
 
-## 🏗️ Architecture
-Sentinel's modular design ensures scalability and ease of integration:
-- **`app.py`**: Presentation layer and session management.
-- **`analysis.py`**: Core logic engine for AI and Scoring.
-- **`enrichment.py`**: Telemetry normalization and OSINT lookups.
-- **`database.py`**: Persistent storage using SQLite.
-- **`splunk_ingest.py`**: SIEM connector logic.
+2. Add your API keys to `.env`:
+   ```
+   OPENAI_API_KEY=sk-...
+   VT_API_KEY=...
+   ```
 
----
-*Sentinel: Strategic Triage Platform | v1.0.2*
+3. Run the app:
+   ```
+   streamlit run app.py
+   ```
+
+4. Open `http://localhost:8501` in your browser.

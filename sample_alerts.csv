@@ -1,0 +1,6 @@
+timestamp,source_ip,dest_ip,event_type,severity,message
+2026-03-03T08:12:30,185.220.101.34,web-prod-01,SQL Injection,Critical,Malicious SQL payload detected in POST /api/login
+2026-03-03T08:14:55,45.33.32.156,dc-internal-02,Brute Force,High,120 failed SSH logins for root in 60 seconds
+2026-03-03T08:21:10,8.8.8.8,workstation-114,Reconnaissance,Medium,Nmap SYN scan detected across 1024 ports
+2026-03-03T09:05:42,103.21.244.12,mail-gw-01,Phishing,High,Suspicious attachment in inbound email from external domain
+2026-03-03T09:33:18,192.168.1.55,file-server-03,Malware,Critical,Trojan signature detected in uploaded binary

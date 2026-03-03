@@ -1,6 +1,5 @@
 streamlit
-openai
-requests
-python-dotenv
 pandas
-splunk-sdk
+requests
+openai
+python-dotenv

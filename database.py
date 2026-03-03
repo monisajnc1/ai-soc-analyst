@@ -2,78 +2,83 @@ import sqlite3
 import json
 from datetime import datetime
 
-# Path to our local sqlite db
-DB_PATH = "soc_triage.db"
+DB_FILE = "soc_triage.db"
+
 
 def init_db():
-    db = sqlite3.connect(DB_PATH)
-    cur = db.cursor()
-    # Initial table setup
-    cur.execute('''
+    """Create the alerts table if it doesn't exist."""
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT,
-            source_ip TEXT,
-            destination_ip TEXT,
-            event_type TEXT,
-            severity TEXT,
-            message TEXT,
-            raw_data TEXT,
-            ai_analysis TEXT,
-            vt_report TEXT,
-            mitre_mapping TEXT,
-            response_recommendation TEXT,
-            status TEXT DEFAULT 'New',
-            assigned_to TEXT DEFAULT 'Unassigned',
-            comments TEXT DEFAULT '[]'
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp     TEXT,
+            source_ip     TEXT,
+            dest_ip       TEXT,
+            event_type    TEXT,
+            severity      TEXT,
+            message       TEXT,
+            raw_log       TEXT,
+            vt_result     TEXT,
+            mitre_tag     TEXT,
+            ai_summary    TEXT,
+            response_plan TEXT,
+            status        TEXT DEFAULT 'New'
         )
-    ''')
-    db.commit()
-    db.close()
+    """)
+    conn.commit()
+    conn.close()
 
-def insert_alert(data):
-    db = sqlite3.connect(DB_PATH)
-    cur = db.cursor()
-    cur.execute('''
-        INSERT INTO alerts (
-            timestamp, source_ip, destination_ip, event_type, severity, message, raw_data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        data.get('timestamp', datetime.now().isoformat()),
-        data.get('source_ip'),
-        data.get('destination_ip'),
-        data.get('event_type'),
-        data.get('severity', 'Medium'),
-        data.get('message'),
-        json.dumps(data.get('raw_data', {}))
+
+def insert_alert(alert_dict):
+    """Insert a new alert row and return its row id."""
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO alerts
+            (timestamp, source_ip, dest_ip, event_type, severity, message, raw_log)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        alert_dict.get("timestamp", datetime.now().isoformat()),
+        alert_dict.get("source_ip") or alert_dict.get("src_ip"),
+        alert_dict.get("dest_ip") or alert_dict.get("destination"),
+        alert_dict.get("event_type") or alert_dict.get("type"),
+        alert_dict.get("severity", "Medium"),
+        alert_dict.get("message") or alert_dict.get("msg"),
+        json.dumps(alert_dict),
     ))
-    new_id = cur.lastrowid
-    db.commit()
-    db.close()
-    return new_id
+    row_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return row_id
 
-def update_alert(alert_id, fields):
-    db = sqlite3.connect(DB_PATH)
-    cur = db.cursor()
-    
-    # Dynamic update query based on passed dict
-    clause = ", ".join([f"{k} = ?" for k in fields.keys()])
-    vals = list(fields.values())
-    vals.append(alert_id)
-    
-    cur.execute(f"UPDATE alerts SET {clause} WHERE id = ?", vals)
-    db.commit()
-    db.close()
 
-def get_alerts():
-    db = sqlite3.connect(DB_PATH)
-    db.row_factory = sqlite3.Row
-    cur = db.cursor()
+def update_alert(row_id, fields: dict):
+    """Update specific columns for a given alert id."""
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    set_expr = ", ".join(f"{col} = ?" for col in fields)
+    values = list(fields.values()) + [row_id]
+    cur.execute(f"UPDATE alerts SET {set_expr} WHERE id = ?", values)
+    conn.commit()
+    conn.close()
+
+
+def get_all_alerts():
+    """Return every alert as a list of dicts, newest first."""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
     cur.execute("SELECT * FROM alerts ORDER BY id DESC")
-    rows = cur.fetchall()
-    db.close()
-    return [dict(r) for r in rows]
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
 
-if __name__ == "__main__":
-    init_db()
-    print("Database ready.")
+
+def clear_all_alerts():
+    """Drop all rows from the alerts table."""
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM alerts")
+    conn.commit()
+    conn.close()
