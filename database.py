@@ -1,8 +1,17 @@
 import sqlite3
 import json
+import os
 from datetime import datetime
+from pathlib import Path
 
-DB_FILE = "soc_triage.db"
+# ---- Cloud-Proof Database Path ----
+# Detects if running on Streamlit Cloud or local
+if os.path.exists("/mount/src/ai-soc-analyst"):
+    # Streamlit Cloud environment: use /tmp (always writable)
+    DB_FILE = "/tmp/soc_triage.db"
+else:
+    # Local environment: use project folder
+    DB_FILE = str(Path(__file__).parent / "soc_triage.db")
 
 
 def init_db():
@@ -69,9 +78,14 @@ def get_all_alerts():
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    cur.execute("SELECT * FROM alerts ORDER BY id DESC")
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
+    try:
+        cur.execute("SELECT * FROM alerts ORDER BY id DESC")
+        rows = [dict(r) for r in cur.fetchall()]
+    except sqlite3.OperationalError:
+        # Table might not exist yet if no alerts triaged
+        rows = []
+    finally:
+        conn.close()
     return rows
 
 
